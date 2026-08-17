@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import date
 from urllib.parse import urlsplit, urlunsplit
 import hashlib
 import re
@@ -83,14 +84,23 @@ _TERMOS_TITULO_HIBRIDO = ["hybrid", "hibrido"]
 _TERMOS_TITULO_PRESENCIAL = ["on-site", "onsite", "on site", "presencial"]
 
 
-def _modalidade_pelo_titulo(titulo: str) -> str | None:
-    """Devolve a modalidade real quando o TÍTULO contradiz "remoto"
-    (Híbrido/Presencial) — None quando o título não contradiz nada (a
-    classificação da fonte permanece confiável)."""
-    titulo_norm = _normalizar(titulo)
-    if any(termo in titulo_norm for termo in _TERMOS_TITULO_HIBRIDO):
+def _modalidade_pelo_titulo(titulo: str, local: str = "") -> str | None:
+    """Devolve a modalidade real quando o TÍTULO ou o LOCAL contradiz
+    "remoto" (Híbrido/Presencial) — None quando nenhum dos dois contradiz
+    nada (a classificação da fonte permanece confiável).
+
+    MEDIDO (caso real, LinkedIn Internacional): vaga com f_WT=2 (o próprio
+    LinkedIn confirmando "remoto") veio com `local`="San Francisco Bay
+    Area (Hybrid)" — o aviso de modalidade estava dentro do LOCAL, não do
+    título ("Product Designer" sozinho, sem nenhuma palavra de modalidade).
+    Checar só o título deixava esse caso passar batido. LinkedIn coloca a
+    modalidade nos dois lugares dependendo do card — checar os dois é mais
+    seguro que escolher um só.
+    """
+    texto_norm = _normalizar(f"{titulo} {local}")
+    if any(termo in texto_norm for termo in _TERMOS_TITULO_HIBRIDO):
         return "Híbrido"
-    if any(termo in titulo_norm for termo in _TERMOS_TITULO_PRESENCIAL):
+    if any(termo in texto_norm for termo in _TERMOS_TITULO_PRESENCIAL):
         return "Presencial"
     return None
 
@@ -619,6 +629,65 @@ def extrair_data_publicacao(texto_card: str) -> str:
     return ""
 
 
+_PADRAO_IDADE_RELATIVA = re.compile(r"ha\s+(\d+)\s+(dias?|semanas?|meses?|anos?)")
+_PADRAO_IDADE_ABSOLUTA = re.compile(r"(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?")
+
+
+def idade_em_dias(publicado_em: str, hoje: date | None = None) -> int | None:
+    """Converte o texto de publicado_em (relativo — 'Há 2 meses' — ou
+    absoluto — '11/08') pra idade aproximada em dias.
+
+    "Mês"/"ano" viram 30/365 dias fixos — aproximação, não conta dia exato
+    do mês (o texto de origem também não é exato: "Há 2 meses" já é uma
+    aproximação da própria fonte).
+
+    Retorna None quando publicado_em está vazio ou não bate nenhum padrão
+    conhecido — idade DESCONHECIDA, não "vaga antiga". RegrasFiltro.
+    idade_maxima_dias trata None como "não filtra essa vaga por idade" (ver
+    Job._avaliar), pra não descartar vaga só porque a fonte não expõe data.
+    """
+    if not publicado_em:
+        return None
+    hoje = hoje or date.today()
+    texto = _normalizar(publicado_em)
+
+    if "hoje" in texto:
+        return 0
+    if "ontem" in texto:
+        return 1
+
+    m = _PADRAO_IDADE_RELATIVA.search(texto)
+    if m:
+        qtd, unidade = int(m.group(1)), m.group(2)
+        if unidade.startswith("dia"):
+            return qtd
+        if unidade.startswith("semana"):
+            return qtd * 7
+        if unidade.startswith("mes"):
+            return qtd * 30
+        return qtd * 365  # ano/anos
+
+    m = _PADRAO_IDADE_ABSOLUTA.search(texto)
+    if m:
+        dia, mes = int(m.group(1)), int(m.group(2))
+        ano = int(m.group(3)) if m.group(3) else hoje.year
+        if ano < 100:
+            ano += 2000
+        try:
+            data_pub = date(ano, mes, dia)
+        except ValueError:
+            return None
+        # Site que só publica dia/mês (sem ano) e o aniversário já passou
+        # este ano — "11/08" publicado em dezembro do ano passado, achado
+        # em janeiro, senão viraria "data no futuro" e a conta ficaria
+        # negativa.
+        if data_pub > hoje:
+            data_pub = data_pub.replace(year=ano - 1)
+        return (hoje - data_pub).days
+
+    return None
+
+
 # Ordem importa: do mais específico pro mais genérico. Título não é
 # filtrado por senioridade — só é classificado, pra decidir isso na hora de
 # ler a notificação, não em deixar a vaga passar ou não.
@@ -697,6 +766,14 @@ class RegrasFiltro:
     # mercado hispanofalante-lusófono explicitamente. None = não checa
     # (BR não precisa — fonte já é 100% brasileira/portuguesa).
     idiomas_exigidos: list[str] | None = None
+    # Idade máxima aceita (em dias), medida a partir de Job.publicado_em
+    # (ver idade_em_dias). None (default) = não filtra por idade, mantém o
+    # comportamento de antes desse campo existir. Vaga com idade
+    # DESCONHECIDA (fonte não expõe data, ou texto não bate nenhum padrão
+    # conhecido) sempre passa, mesmo com esse campo preenchido — sem data
+    # não tem base pra rejeitar, e algumas fontes (ex: Gupy) nunca expõem
+    # isso no card de busca.
+    idade_maxima_dias: int | None = None
 
 
 @dataclass
@@ -716,6 +793,7 @@ class _Avaliacao:
     escopos: set[str]
     mercado_confirmado: bool  # escopo bateu explicitamente um mercado aceito
     idioma_bateu_titulo: bool
+    bate_idade: bool
 
 
 # Pesos do score de relevância (pontuar_relevancia, máximo 10) — soma
@@ -812,8 +890,8 @@ class Job:
     motivo: str = ""
 
     def __post_init__(self):
-        """Sobrepõe modalidade="Remoto" quando o TÍTULO contradiz (Híbrido/
-        Presencial) — ver _modalidade_pelo_titulo.
+        """Sobrepõe modalidade="Remoto" quando o TÍTULO ou o LOCAL contradiz
+        (Híbrido/Presencial) — ver _modalidade_pelo_titulo.
 
         MEDIDO: essa correção existia só dentro de linkedin.py/
         linkedin_intl.py, aplicada manualmente na hora de montar o Job.
@@ -823,8 +901,13 @@ class Job:
         nativo passava como remota no perfil internacional. Import por
         scraper depende de cada um lembrar de aplicar; aqui roda pra TODO
         Job automaticamente, incluindo fonte futura que ainda nem existe.
+
+        MEDIDO (caso real): "San Francisco Bay Area (Hybrid)" — o aviso
+        de modalidade veio dentro do LOCAL, título sem nenhuma palavra de
+        contradição. Checar só o título deixava passar; agora checa os
+        dois campos (ver _modalidade_pelo_titulo).
         """
-        modalidade_real = _modalidade_pelo_titulo(self.titulo)
+        modalidade_real = _modalidade_pelo_titulo(self.titulo, self.local)
         if modalidade_real and self.modalidade == "Remoto":
             self.modalidade = modalidade_real
 
@@ -1047,8 +1130,18 @@ class Job:
             if _normalizar(c) not in _FLAGS_REMOTO
         )
 
+        # Idade desconhecida (None) sempre passa — ver docstring de
+        # idade_maxima_dias. Só rejeita quando dá pra medir E excede o
+        # limite configurado.
+        idade = idade_em_dias(self.publicado_em)
+        bate_idade = (
+            regras.idade_maxima_dias is None
+            or idade is None
+            or idade <= regras.idade_maxima_dias
+        )
+
         return _Avaliacao(
-            aprovada=bate_keyword and bate_cidade,
+            aprovada=bate_keyword and bate_cidade and bate_idade,
             bate_forte=bate_forte,
             bate_ambiguo=bate_ambiguo,
             bate_ferramenta=bate_ferramenta,
@@ -1056,6 +1149,7 @@ class Job:
             escopos=escopos,
             mercado_confirmado=bate_remoto and bool(escopos),
             idioma_bateu_titulo=idioma_bateu_titulo,
+            bate_idade=bate_idade,
         )
 
     def pontuar_relevancia(self, regras: RegrasFiltro) -> int:
