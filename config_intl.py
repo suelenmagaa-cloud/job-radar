@@ -4,7 +4,7 @@
 #
 # Credenciais do Telegram e caminho do banco reaproveitados de
 # config.py — mesmo esquema do projeto original.
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DB_PATH, CIDADES_EUROPA_IBERICA  # noqa: F401
+from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DB_PATH, CIDADES_EUROPA_IBERICA, IDADE_MAXIMA_DIAS  # noqa: F401
 
 # Cargo em inglês e português — vaga internacional pode vir anunciada
 # nos dois, dependendo de quem contratou. Nada em espanhol de
