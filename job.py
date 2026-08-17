@@ -740,19 +740,24 @@ _PESO_SENIORIDADE_NEUTRA = 1  # título sem nível classificável — não penal
 # Peso negativo simétrico ao bônus (+2/-2): puxa pra baixo sem excluir —
 # a vaga continua passando por combina_com() e notificando (imediata ou no
 # digest), só cai mais no ranking.
-_PESO_SENIORIDADE_ACIMA_DO_ALVO = -2
+_PESO_SENIORIDADE_ABAIXO_DO_ALVO = -2
 _PESO_MERCADO = 2
 _PESO_MERCADO_NAO_CONFIRMADO = 1  # remota sem mercado declarado no texto (aceita por padrão, sem confirmar)
 _PESO_IDIOMA = 1
 
-# Prioridade definida pelo usuário: Júnior e Pleno pontuam o teto de
-# senioridade (bônus). Sênior/Especialista/Liderança pontuam negativo
-# (acima do alvo, deságio). Estágio/Trainee fica neutro — nem é o alvo nem
-# é o problema de "vaga tolerável demais" que motivou o deságio (volume
-# desprezível: 0,3% da base). Nada disso é filtro — a vaga ainda notifica,
-# só muda a posição no ranking (imediata vs. digest, topo vs. fundo).
-_NIVEIS_SENIORIDADE_ALVO = {"Júnior", "Pleno"}
-_NIVEIS_SENIORIDADE_ACIMA_DO_ALVO = {"Sênior", "Especialista", "Liderança"}
+# ADAPTADO para o perfil de Suelen (Senior Product Designer, 10+ anos):
+# Sênior/Especialista pontuam o teto de senioridade (bônus) — é o nível
+# real dela, não faz sentido penalizar a própria senioridade. Júnior/Pleno
+# pontuam negativo (abaixo do alvo, deságio) — mesma lógica simétrica do
+# projeto original, só invertida. Liderança (coordenador/gerente/head)
+# fica DE FORA dos dois grupos de propósito — ela está avaliando pivô pra
+# PM/PO ou DesignOps mas ainda não decidiu (ver notas de carreira), então
+# não faz sentido nem bonificar nem penalizar vaga de gestão ainda; cai no
+# ramo "else" (0, neutro-baixo, mesmo tratamento de Estágio/Trainee).
+# Nada disso é filtro — a vaga ainda notifica, só muda a posição no
+# ranking (imediata vs. digest, topo vs. fundo).
+_NIVEIS_SENIORIDADE_ALVO = {"Sênior", "Especialista"}
+_NIVEIS_SENIORIDADE_ABAIXO_DO_ALVO = {"Júnior", "Pleno"}
 
 
 @dataclass
@@ -1093,8 +1098,8 @@ class Job:
         nivel = self.senioridade
         if nivel in _NIVEIS_SENIORIDADE_ALVO:
             pontos_senioridade = _PESO_SENIORIDADE_ALVO
-        elif nivel in _NIVEIS_SENIORIDADE_ACIMA_DO_ALVO:
-            pontos_senioridade = _PESO_SENIORIDADE_ACIMA_DO_ALVO
+        elif nivel in _NIVEIS_SENIORIDADE_ABAIXO_DO_ALVO:
+            pontos_senioridade = _PESO_SENIORIDADE_ABAIXO_DO_ALVO
         elif nivel == "Não especificado" or nivel.startswith("Nível "):
             pontos_senioridade = _PESO_SENIORIDADE_NEUTRA
         else:
