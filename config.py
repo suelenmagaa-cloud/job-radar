@@ -1,4 +1,3 @@
-
 import os
 from dotenv import load_dotenv
 
@@ -143,6 +142,13 @@ LOCATIONS_LINKEDIN_REMOTO_APENAS = ["Estados Unidos", "Reino Unido", "Alemanha",
 # propósito — se uma vaga declarar "Remote — Argentina only" ela cai
 # fora, o que é a leitura mais fiel do "nada de espanhol".
 MERCADOS_REMOTO_ACEITOS = ["Brasil", "LATAM", "Portugal", "Estados Unidos", "Reino Unido", "Europa", "Alemanha"]
+
+# Idade máxima aceita pra vaga (dias), medida a partir do texto de
+# publicação do card ("Há 2 meses", "11/08"). Vaga sem data exposta pela
+# fonte (ex: Gupy nunca mostra isso) continua passando normalmente — sem
+# base pra medir idade, não tem como rejeitar. 30 dias é ponto de partida;
+# ajuste aqui se quiser mais rígido (ex: 14) ou mais frouxo (ex: 60).
+IDADE_MAXIMA_DIAS = 30
 
 INTERVALO_MINUTOS = int(os.getenv("INTERVALO_MINUTOS", 180))
 
