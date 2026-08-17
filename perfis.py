@@ -31,6 +31,7 @@ from config import (
     MERCADOS_REMOTO_ACEITOS,
     TERMOS_BUSCA,
     TERMOS_POR_CICLO,
+    IDADE_MAXIMA_DIAS,
 )
 from config_intl import (
     KEYWORDS_INTL,
@@ -103,6 +104,7 @@ _REGRAS_BR = RegrasFiltro(
     qualificadores_cargo=QUALIFICADORES_CARGO,
     cidades=CIDADES,
     mercados_remoto_aceitos=MERCADOS_REMOTO_ACEITOS,
+    idade_maxima_dias=IDADE_MAXIMA_DIAS,
 )
 
 # Eixo secundário (Ibéria): mesma regra de cargo, cidade europeia em vez de
@@ -194,6 +196,7 @@ _REGRAS_INTL = RegrasFiltro(
     cidades=CIDADES_INTL,
     mercados_remoto_aceitos=MERCADOS_REMOTO_ACEITOS_INTL,
     idiomas_exigidos=IDIOMAS_EXIGIDOS_INTL,
+    idade_maxima_dias=IDADE_MAXIMA_DIAS,
 )
 
 # Eixo secundário (Ibéria): vaga presencial/híbrida em Portugal/Espanha,
