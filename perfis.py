@@ -1,3 +1,4 @@
+
 """Perfis de mercado (Brasil / Internacional) do JobRadar.
 
 Antes disso existiam DOIS programas quase idênticos — main.py e
