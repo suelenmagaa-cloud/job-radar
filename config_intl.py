@@ -85,10 +85,23 @@ TERMOS_POR_CICLO_INTL = 10
 # --once e confira o log antes de deixar no cron — se algum não
 # resolver, o scraper só loga 0 vagas pra aquele país, não quebra o
 # resto.
+# Removi "Portugal" da lista de BUSCA por decisão sua (17/08): resultado
+# real veio dominado por vaga com barreira geográfica (exige residência/
+# elegibilidade em Portugal apesar de anunciada "remoto"). "Portugal"
+# continua em MERCADOS_REMOTO_ACEITOS_INTL abaixo — se uma vaga aparecer
+# via busca EUA/Reino Unido/Alemanha e declarar escopo "Remote — Portugal
+# OK", ela ainda é aceita; só paramos de buscar ATIVAMENTE nessa geografia
+# específica, que é o que gerava o volume de ruído.
+#
+# NÃO TESTADO ao vivo contra o endpoint do LinkedIn (diferente de Spain,
+# que o projeto original já validou): "United States", "United Kingdom",
+# "Germany", "Netherlands", "Ireland" são meu melhor palpite de nome de
+# location aceito. Rode uma vez com --once e confira o log antes de
+# deixar no cron — se algum não resolver, o scraper só loga 0 vagas pra
+# aquele país, não quebra o resto.
 LOCATIONS_INTL = [
     "United States",
     "United Kingdom",
-    "Portugal",
     "Germany",
     "Netherlands",
     "Ireland",
