@@ -5,7 +5,7 @@ from urllib.parse import quote_plus
 from playwright.sync_api import sync_playwright
 
 from config import LOCATIONS_LINKEDIN, LOCATIONS_LINKEDIN_REMOTO_APENAS
-from job import Job, _e_remoto, _normalizar, extrair_data_publicacao
+from job import Job, _e_remoto, _normalizar, _modalidade_pelo_titulo, extrair_data_publicacao
 from logger import get_logger
 from scrapers.base import BaseScraper
 
@@ -166,13 +166,24 @@ class LinkedInScraper(BaseScraper):
                             else:
                                 modalidade = "Remoto" if _e_remoto(_normalizar(local)) else ""
 
+                            texto_card = card.inner_text()
+
+                            # MEDIDO (caso real, 18/08, perfil internacional —
+                            # mesma API por trás dos dois scrapers de LinkedIn):
+                            # badge de modalidade solto no card, fora do título e
+                            # do `local`. Reaproveita o texto inteiro do card
+                            # (já extraído pra achar a data) pra pegar esse sinal.
+                            modalidade_do_card = _modalidade_pelo_titulo(titulo, f"{local} {texto_card}")
+                            if modalidade_do_card and modalidade == "Remoto":
+                                modalidade = modalidade_do_card
+
                             link_el = card.query_selector("a.base-card__full-link")
                             link = link_el.get_attribute("href") if link_el else None
                             if not link:
                                 continue
                             link = link.split("?")[0]
 
-                            publicado_em = extrair_data_publicacao(card.inner_text())
+                            publicado_em = extrair_data_publicacao(texto_card)
 
                             vagas.append(Job(
                                 titulo=titulo,
