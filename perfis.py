@@ -39,6 +39,7 @@ from scrapers.linkedin import LinkedInScraper
 from scrapers.linkedin_intl import LinkedInIntlScraper
 from scrapers.solides import SolidesScraper
 from scrapers.weworkremotely_intl import WeWorkRemotelyIntlScraper
+from scrapers.remotive_intl import RemotiveIntlScraper
 
 FREQUENCIA_ALTA = "alta"
 FREQUENCIA_BAIXA = "baixa"
@@ -142,6 +143,7 @@ _SCRAPERS_INTL = [
     DefinicaoScraper(LinkedInIntlScraper, FREQUENCIA_ALTA, {"locations": LOCATIONS_INTL}),
     DefinicaoScraper(IndeedIntlScraper, FREQUENCIA_ALTA, {"dominios": DOMINIOS_INDEED_INTL}),
     DefinicaoScraper(WeWorkRemotelyIntlScraper, FREQUENCIA_ALTA),
+    DefinicaoScraper(RemotiveIntlScraper, FREQUENCIA_ALTA),
 ]
 
 PERFIL_INTL = Perfil(
@@ -156,10 +158,11 @@ PERFIL_INTL = Perfil(
     termos_busca=TERMOS_BUSCA_INTL,
     termos_por_ciclo=TERMOS_POR_CICLO_INTL,
     definicao_scrapers=_SCRAPERS_INTL,
-    max_scrapers_concorrentes=3,
+    max_scrapers_concorrentes=4,
 )
 
 PERFIS = {
     PERFIL_BR.chave: PERFIL_BR,
     PERFIL_INTL.chave: PERFIL_INTL,
+}
 }
