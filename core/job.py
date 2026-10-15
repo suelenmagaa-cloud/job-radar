@@ -527,7 +527,18 @@ _UF_DA_CIDADE = {
     # (MG), "Fortaleza dos Nogueiras" (MA) e "Fortaleza dos Valos" (RS).
     # Medido: sem esta linha, as três passavam.
     "fortaleza": "ce",
+    # São Paulo do Potengi (RN) e São Paulo de Olivença (AM) começam com o
+    # mesmo nome. Com a UF aqui, "São Paulo do Potengi, Rio Grande do Norte"
+    # é barrada.
+    "sao paulo": "sp",
 }
+
+# "São Paulo" é cidade E estado. O LinkedIn escreve "Cidade, Estado", então
+# "Sorocaba, São Paulo" casava o nome "São Paulo" e passava como se fosse a
+# capital (medido no jobs.db: Sorocaba, Campinas e São José do Rio Preto
+# aprovadas). Para essas cidades o nome tem de estar no PRIMEIRO pedaço do
+# local — o da cidade —, não no do estado.
+_CIDADES_HOMONIMAS_DE_ESTADO = {"sao paulo", "rio de janeiro"}
 
 
 # MEDIDO (2026-08-21): a guarda de UF só entendia SIGLA de duas letras, mas o
@@ -575,6 +586,11 @@ def _cidade_confere(cidade_norm: str, local_norm: str) -> bool:
 
     Ver _UF_DA_CIDADE. So reprova quando o texto declara uma UF e ela
     contradiz a esperada."""
+    if cidade_norm in _CIDADES_HOMONIMAS_DE_ESTADO:
+        pedacos = [p.strip(" .") for p in re.split(r"[,\-–—/(]", local_norm)]
+        primeiro = next((p for p in pedacos if p), "")
+        if not _contem_termo(cidade_norm, primeiro):
+            return False
     uf_esperada = _UF_DA_CIDADE.get(cidade_norm)
     if uf_esperada is None:
         return True
@@ -1056,8 +1072,13 @@ _PESO_IDIOMA = 1
 # é o problema de "vaga tolerável demais" que motivou o deságio (volume
 # desprezível: 0,3% da base). Nada disso é filtro — a vaga ainda notifica,
 # só muda a posição no ranking (imediata vs. digest, topo vs. fundo).
-_NIVEIS_SENIORIDADE_ALVO = {"Júnior", "Pleno"}
-_NIVEIS_SENIORIDADE_ACIMA_DO_ALVO = {"Sênior", "Especialista", "Liderança"}
+#
+# PERFIL UX (Suelen): o alvo é Sênior/Especialista. Os nomes das constantes
+# ficaram (testes e docstrings referenciam), mas o sentido inverteu:
+# "ACIMA_DO_ALVO" agora é o que está ABAIXO do nível dela (Júnior/Pleno).
+# Liderança não entra em nenhum dos dois (0 ponto).
+_NIVEIS_SENIORIDADE_ALVO = {"Sênior", "Especialista"}
+_NIVEIS_SENIORIDADE_ACIMA_DO_ALVO = {"Júnior", "Pleno"}
 
 
 @dataclass
