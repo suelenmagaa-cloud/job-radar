@@ -1,0 +1,298 @@
+name: JobRadar
+
+on:
+  # ONDE O CICLO RODA -- historico, porque isso ja mudou de lugar duas
+  # vezes e o motivo importa mais que a escolha.
+  #
+  # CORRECAO DE 30/08, 16:30: a versao anterior deste comentario dizia que
+  # o motivo era bloqueio ao IP de datacenter do Actions. ESTAVA ERRADO --
+  # o ciclo local, de IP residencial, deu 22 buscas vazias contra 13 do
+  # Actions, e o mesmo par devolve 0 e 10 em horas diferentes do MESMO IP.
+  # A medicao inteira esta no topo de scrapers/linkedin.py. Rodar aqui ou
+  # na maquina da usuaria NAO muda o resultado das buscas.
+  #
+  # Entao a escolha entre os dois e de conveniencia, nao tecnica: aqui roda
+  # sozinho e nao depende do computador ligado; la o ciclo termina mais
+  # rapido (~26 min contra ~35) e da pra ver o log ao vivo.
+  #
+  # O QUE NAO PODE e deixar os dois ligados: a deduplicacao mora em
+  # data/jobs.db, que este workflow commita de volta no repositorio. Com o
+  # ciclo local rodando sem empurrar o banco, este aqui parte de um banco
+  # desatualizado e RENOTIFICA vaga ja avisada.
+  #
+  # RELIGADO em 30/08 19:50, depois de um ciclo rodado na maquina da
+  # usuaria. Rodar la nao melhorou busca nenhuma (deu 22 vazias contra 13
+  # daqui), e exige o computador ligado -- entao voltou pro automatico.
+  # Um lugar por vez, sempre: ver a nota do data/jobs.db acima.
+  #
+  # MUDANCA DE 17/11 (Suelen): de "a cada 3h" para DUAS VEZES POR DIA.
+  # Entre 6/11 e 13/11 quase nenhum ciclo agendado chegou ao commit -- o
+  # sinal de ciclo cortado pelo timeout de 150 min (o corte acontece antes
+  # do passo de commit, entao nao sobra rastro no repositorio). Com 10h de
+  # intervalo, o timeout pode subir para 300 min sem risco de um ciclo
+  # empilhar no proximo.
+  #
+  # Minuto 17, e nao 0, de proposito: o GitHub atrasa e descarta muito
+  # disparo agendado na hora cheia, quando todo mundo agenda.
+  #
+  # 10:17 e 20:17 UTC = 07:17 e 17:17 em Sao Paulo.
+  #
+  # Quem edita esta linha de cron passa a receber o e-mail do GitHub quando
+  # o ciclo agendado FALHA (o aviso vai para quem mexeu no cron por ultimo).
+  # Antes desta mudanca, esse e-mail ia para a autora original do radar.
+  schedule:
+    - cron: "17 10,20 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: jobradar-cycle
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  # Para o passo "Manter o agendamento vivo", no fim do job.
+  actions: write
+
+jobs:
+  buscar-vagas:
+    runs-on: ubuntu-latest
+    # Sem isso, o padrão do GitHub Actions é 6h (360min) — uma fonte travada
+    # (ex: Catho com timeout de anti-bot, ou LinkedIn rate-limitado)
+    # consumiria até 6h de cada vez. Com concurrency.cancel-in-progress:
+    # false, um run travado também bloqueia o próximo ciclo inteiro, porque
+    # o run seguinte fica na fila esperando o anterior liberar o grupo. 150
+    # min dá folga real sobre a duração medida do ciclo (~1h30-2h com toda a
+    # paginação e a passada dupla do LinkedIn) e ainda fica abaixo do
+    # intervalo do cron (3h), então um run truncado nunca empilha em cima
+    # do próximo agendado.
+    # 17/11: era 150. Ver a nota do cron -- com dois ciclos por dia, 300
+    # min ainda fica bem abaixo do intervalo (10h) entre um e outro.
+    timeout-minutes: 300
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependências
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      # ===== ETAPA 1 DA SAIDA DO BANCO DO GIT (03/10/2026) =====
+      #
+      # PROBLEMA. data/jobs.db e versionado. Duas contas ja vieram disso:
+      #   · rodada local perde registro. O log mostra o Indeed Intl gravando
+      #     3, 5 e 5 vagas novas em rodadas na maquina da usuaria; nenhuma
+      #     esta no banco. `git checkout -- .` devolve o banco ao estado
+      #     commitado, e vaga ja avisada volta a ser inedita.
+      #   · o historico de busca dela mora num repositorio publico.
+      #
+      # POR QUE EM DUAS ETAPAS, e nao de uma vez. A guarda contra enxurrada
+      # (BancoVazioSuspeito, em database/database.py) so dispara quando o
+      # arquivo EXISTIA com conteudo e a tabela veio vazia. Arquivo ausente
+      # ela entende como primeiro uso, e segue. Hoje isso nunca acontece
+      # porque o git clone sempre traz o banco — tirar o banco do git tira
+      # essa garantia junto. Se o cache estiver vazio na primeira execucao
+      # depois da troca, as 3.559 vagas do banco viram "novas" de uma vez.
+      #
+      # Entao esta etapa NAO muda comportamento nenhum: ela semeia o cache e
+      # MEDE se ele volta. O banco continua vindo do git e continua sendo
+      # commitado, exatamente como antes. A troca de verdade (git rm
+      # --cached, guarda estrita, fim do passo de commit) so acontece depois
+      # de um ciclo provar que o cache acerta e traz o mesmo numero de vagas.
+      #
+      # estado/jobs.db e caminho SEPARADO de data/jobs.db de proposito: se os
+      # dois fossem o mesmo, a restauracao do cache sobrescreveria o banco do
+      # repositorio e esta etapa deixaria de ser inofensiva.
+      - name: "Restaurar o cache do banco (etapa 1 — so medicao)"
+        id: cache-do-banco
+        uses: actions/cache/restore@v4
+        with:
+          path: estado/jobs.db
+          key: jobs-db-${{ github.run_id }}
+          restore-keys: jobs-db-
+
+      - name: Comparar o banco do cache com o do repositorio
+        run: |
+          echo "cache-hit        : ${{ steps.cache-do-banco.outputs.cache-hit }}"
+          echo "chave encontrada : ${{ steps.cache-do-banco.outputs.cache-matched-key }}"
+          python - <<'PY'
+          import os, sqlite3
+
+          def contar(caminho):
+              if not os.path.exists(caminho) or os.path.getsize(caminho) == 0:
+                  return "ausente ou vazio"
+              try:
+                  with sqlite3.connect(caminho) as conexao:
+                      return conexao.execute("SELECT COUNT(*) FROM vagas_vistas").fetchone()[0]
+              except Exception as erro:
+                  return f"erro ao abrir: {erro}"
+
+          do_git = contar("data/jobs.db")
+          do_cache = contar("estado/jobs.db")
+          print(f"vagas no banco do repositorio: {do_git}")
+          print(f"vagas no banco do cache      : {do_cache}")
+          if do_cache == "ausente ou vazio":
+              print("LEITURA: cache ainda nao semeado (esperado na primeira execucao).")
+          elif do_git == do_cache:
+              print("LEITURA: cache em dia. A etapa 2 pode ir.")
+          else:
+              print("LEITURA: os dois DIVERGEM. Investigar ANTES da etapa 2 — "
+                    "trocar pelo cache agora renotificaria a diferenca.")
+          PY
+
+      - name: Rodar JobRadar (um ciclo de cada perfil)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        # Antes disso só o perfil Brasil rodava aqui — main_intl.py existia
+        # no repositório mas nunca foi chamado pelo workflow, então o
+        # pipeline internacional nunca rodou de verdade em produção. Agora é
+        # um projeto só com dois perfis selecionáveis (ver core/perfis.py); os
+        # dois rodam na mesma execução/commit, um após o outro.
+        run: python main.py --perfil brasil --once
+
+      # jobradar.log esta no .gitignore e o disco do runner e descartado ao
+      # fim da execucao -- ou seja, ate aqui NENHUM log de ciclo do Actions
+      # sobrevivia. Isso so nao doia porque a usuaria colava o log na mao.
+      # Passou a doer quando analisar_vazios.py comecou a precisar de VARIOS
+      # ciclos seguidos pra responder se busca vazia se recupera sozinha.
+      #
+      # if: always() de proposito: o log do ciclo que QUEBROU e justamente o
+      # que mais interessa guardar.
+      - name: Guardar o log do ciclo (pra analisar_vazios.py)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jobradar-log-${{ github.run_number }}
+          path: jobradar.log
+          retention-days: 14
+          if-no-files-found: warn
+
+      # Copia pro caminho do cache em vez de cachear data/jobs.db direto: ver
+      # o comentario da etapa 1. Enquanto os dois caminhos forem separados,
+      # restaurar o cache nao pode atropelar o banco do repositorio.
+      - name: Semear o cache com o banco deste ciclo
+        id: semear
+        if: always()
+        run: |
+          mkdir -p estado
+          if [ -f data/jobs.db ]; then
+            cp data/jobs.db estado/jobs.db
+            echo "banco copiado pro cache ($(stat -c%s estado/jobs.db) bytes)"
+            echo "tem_banco=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "data/jobs.db nao existe ao fim do ciclo — nada a semear."
+            echo "tem_banco=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Guardar o cache do banco
+        # So quando ha arquivo: actions/cache/save ERRA quando o caminho nao
+        # existe, e com if: always() isso derrubaria o job inteiro por causa
+        # de um ciclo que nem chegou a criar banco.
+        if: always() && steps.semear.outputs.tem_banco == '1'
+        uses: actions/cache/save@v4
+        with:
+          path: estado/jobs.db
+          key: jobs-db-${{ github.run_id }}
+
+      # Rede de seguranca independente do cache: cache do GitHub e descartavel
+      # (expira sozinho, e pode ser limpo pela interface). O artifact aqui e o
+      # que permite RECUPERAR o banco se o cache sumir, em vez de recomecar com
+      # banco vazio — que e justamente o cenario de enxurrada de notificacao.
+      - name: Guardar o banco como artifact (recuperacao)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jobradar-banco-${{ github.run_number }}
+          path: data/jobs.db
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Salvar vagas já vistas (evita notificação duplicada)
+        run: |
+          git config user.name "jobradar-bot"
+          git config user.email "jobradar-bot@users.noreply.github.com"
+
+          # O banco produzido por ESTA execução, guardado fora da árvore do
+          # repositório. É a única coisa deste run que sobrevive ao passo
+          # abaixo — todo o resto é descartado e retomado do GitHub.
+          if [ ! -f data/jobs.db ]; then
+            echo "data/jobs.db não existe ao fim do ciclo — nada a salvar."
+            exit 1
+          fi
+          cp data/jobs.db "${RUNNER_TEMP:-/tmp}/jobs.db"
+
+          # MEDIDO (18/08): este passo usava
+          #
+          #     git rebase origin/main -X theirs
+          #
+          # pra reenviar quando o push era recusado. Na madrugada de 18/08 o
+          # histórico do repositório foi reescrito enquanto uma execução
+          # estava no ar (ela começou 21h e terminou 23h12). Ao ser recusada,
+          # ela caiu nesse rebase e REAPLICOU commits antigos por cima do
+          # estado novo, com "-X theirs" resolvendo a favor da versão do run.
+          # Resultado: main.py e core/config.py voltaram atrás e duas
+          # correções foram desfeitas em produção — descoberto só quando a
+          # usuária relatou que uma notificação parou de chegar.
+          #
+          # Prova de autoria do commit que reverteu (75de7b6): autor
+          # "liliam" (autoria original preservada no replay) mas committer
+          # "jobradar-bot", no mesmo segundo do commit deste passo.
+          #
+          # O robô não tem motivo NENHUM pra escrever arquivo de código. Em
+          # vez de reaplicar commits em cima do estado remoto, ele agora
+          # ADOTA o estado remoto inteiro e recoloca só o banco por cima.
+          # A diferença importa: reaplicar commit pode trazer junto qualquer
+          # coisa que estava naquele commit; recolocar um arquivo só não
+          # pode. Qualquer commit gerado aqui contém data/jobs.db e mais
+          # nada — verificado em simulação com divergência máxima (duas
+          # correções de código + reescrita de histórico ao mesmo tempo).
+          #
+          # Efeito colateral bom: se alguém enviar correção de código no meio
+          # de um ciclo, o robô passa a INCORPORAR essa correção em vez de
+          # disputar com ela.
+          n=0
+          while :; do
+            git fetch origin main
+            git reset --hard origin/main
+
+            cp "${RUNNER_TEMP:-/tmp}/jobs.db" data/jobs.db
+            git add data/jobs.db
+
+            if git diff --cached --quiet; then
+              echo "Nada novo pra commitar."
+              exit 0
+            fi
+
+            git commit -m "chore: atualiza vagas vistas [skip ci]"
+
+            if git push; then
+              exit 0
+            fi
+
+            n=$((n + 1))
+            if [ "$n" -ge 5 ]; then
+              echo "Push falhou depois de 5 tentativas."
+              exit 1
+            fi
+            echo "Push rejeitado, sincronizando (tentativa $n)..."
+            sleep $((RANDOM % 5 + 1))
+          done
+
+      # O GitHub DESLIGA sozinho o agendamento de repositorio publico depois
+      # de 60 dias sem atividade. Reabilitar o workflow pela API zera essa
+      # contagem. Roda em todo ciclo (if: always()), inclusive nos que
+      # falham, e nunca derruba o job (|| true).
+      - name: Manter o agendamento vivo
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X PUT "repos/${{ github.repository }}/actions/workflows/jobradar.yml/enable" \
+            && echo "Agendamento reconfirmado." \
+            || echo "Nao consegui reconfirmar o agendamento (nao afeta o ciclo)."
