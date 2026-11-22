@@ -24,8 +24,28 @@ on:
   # usuaria. Rodar la nao melhorou busca nenhuma (deu 22 vazias contra 13
   # daqui), e exige o computador ligado -- entao voltou pro automatico.
   # Um lugar por vez, sempre: ver a nota do data/jobs.db acima.
+  #
+  # MUDANCA DE 17/11 (Suelen): de "a cada 3h" para DUAS VEZES POR DIA.
+  # Depois de 6/11 o GitHub parou de disparar o agendamento de vez: nao ha
+  # nenhum run "schedule" depois disso (nem cortado, nem com falha) -- so
+  # os disparos manuais, que levam 5-8 min. Nao era timeout. Editar a linha
+  # de cron faz o GitHub registrar o agendamento de novo, e o passo "Manter
+  # o agendamento vivo" no fim do job reconfirma a cada ciclo. O timeout
+  # subiu para 300 min so por folga, com 10h entre um ciclo e o outro.
+  #
+  # (Correcao de 22/11: esta versao ficou na raiz do repositorio desde 17/11,
+  # onde o GitHub nao le workflow nenhum. So passou a valer em 22/11.)
+  #
+  # Minuto 17, e nao 0, de proposito: o GitHub atrasa e descarta muito
+  # disparo agendado na hora cheia, quando todo mundo agenda.
+  #
+  # 10:17 e 20:17 UTC = 07:17 e 17:17 em Sao Paulo.
+  #
+  # Quem edita esta linha de cron passa a receber o e-mail do GitHub quando
+  # o ciclo agendado FALHA (o aviso vai para quem mexeu no cron por ultimo).
+  # Antes desta mudanca, esse e-mail ia para a autora original do radar.
   schedule:
-    - cron: "0 */3 * * *"
+    - cron: "17 10,20 * * *"
   workflow_dispatch: {}
 
 concurrency:
@@ -34,6 +54,8 @@ concurrency:
 
 permissions:
   contents: write
+  # Para o passo "Manter o agendamento vivo", no fim do job.
+  actions: write
 
 jobs:
   buscar-vagas:
@@ -47,7 +69,9 @@ jobs:
     # paginação e a passada dupla do LinkedIn) e ainda fica abaixo do
     # intervalo do cron (3h), então um run truncado nunca empilha em cima
     # do próximo agendado.
-    timeout-minutes: 150
+    # 17/11: era 150. Ver a nota do cron -- com dois ciclos por dia, 300
+    # min ainda fica bem abaixo do intervalo (10h) entre um e outro.
+    timeout-minutes: 300
     steps:
       - name: Checkout do repositório
         uses: actions/checkout@v4
@@ -263,3 +287,16 @@ jobs:
             echo "Push rejeitado, sincronizando (tentativa $n)..."
             sleep $((RANDOM % 5 + 1))
           done
+
+      # O GitHub DESLIGA sozinho o agendamento de repositorio publico depois
+      # de 60 dias sem atividade. Reabilitar o workflow pela API zera essa
+      # contagem. Roda em todo ciclo (if: always()), inclusive nos que
+      # falham, e nunca derruba o job (|| true).
+      - name: Manter o agendamento vivo
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X PUT "repos/${{ github.repository }}/actions/workflows/jobradar.yml/enable" \
+            && echo "Agendamento reconfirmado." \
+            || echo "Nao consegui reconfirmar o agendamento (nao afeta o ciclo)."
