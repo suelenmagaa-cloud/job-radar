@@ -204,6 +204,12 @@ DIGEST_HORA_UTC = 9
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
+# Notion: o 👍 no Telegram e as vagas que ela manda para o bot viram linhas
+# "Para avaliar" no banco Job Applications (ver notifier/notion.py). Sem o
+# token, essa parte fica desligada e o radar segue igual.
+NOTION_TOKEN = os.getenv("NOTION_TOKEN", "")
+NOTION_DATABASE_ID = os.getenv("NOTION_DATABASE_ID", "902ae5dfe833453cb91bc4dc9d65edbb")
+
 # Caminho ancorado na RAIZ do projeto (não na pasta deste arquivo): o banco
 # já se perdeu uma vez quando config.py mudou de pasta. JOBRADAR_DB_PATH
 # aponta um banco descartável para testes.

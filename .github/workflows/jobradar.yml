@@ -153,6 +153,9 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # 👍 e vagas mandadas ao bot viram "Para avaliar" no Notion.
+          # Sem este secret a parte do Notion fica desligada.
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
         # Antes disso só o perfil Brasil rodava aqui — main_intl.py existia
         # no repositório mas nunca foi chamado pelo workflow, então o
         # pipeline internacional nunca rodou de verdade em produção. Agora é
