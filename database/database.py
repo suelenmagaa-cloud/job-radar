@@ -313,6 +313,22 @@ def definir_feedback(job_id: str, feedback: str):
         )
 
 
+def obter_vaga(job_id: str) -> dict | None:
+    """Dados de uma vaga já vista, por id — usado quando o 👍 manda a vaga
+    para o Notion (ver processar_feedback_pendente)."""
+    with _conectar() as conn:
+        cursor = conn.execute(
+            "SELECT titulo, empresa, local, link, site, modalidade, relevancia "
+            "FROM vagas_vistas WHERE id = ?",
+            (job_id,),
+        )
+        linha = cursor.fetchone()
+    if not linha:
+        return None
+    chaves = ("titulo", "empresa", "local", "link", "site", "modalidade", "relevancia")
+    return dict(zip(chaves, linha))
+
+
 def obter_vagas_pendentes_digest(perfil_chave: str) -> list[tuple]:
     """Vagas salvas com digest_pendente=1 pra esse perfil, da mais
     relevante pra menos — ver _enviar_digest_diario em main.py. Pode
@@ -343,4 +359,4 @@ def marcar_digest_enviado(perfil_chave: str):
         conn.execute(
             "UPDATE vagas_vistas SET digest_pendente = 0 WHERE perfil = ? AND digest_pendente = 1",
             (perfil_chave,),
-        )
+        )

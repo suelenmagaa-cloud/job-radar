@@ -4,7 +4,13 @@ import json
 import requests
 
 from core.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-from database.database import definir_feedback, definir_metadado, obter_metadado
+from database.database import definir_feedback, definir_metadado, obter_metadado, obter_vaga
+from notifier.notion import (
+    criar_para_avaliar,
+    descricao_da_vaga_do_radar,
+    extrair_link,
+    titulo_da_mensagem,
+)
 from core.logger import get_logger
 
 logger = get_logger()
@@ -251,6 +257,68 @@ def _parsear_callback_data(data: str) -> tuple[str, str] | None:
 
 _OFFSET_CHAVE = "telegram_update_offset"
 
+_RESPOSTAS_NOTION = {
+    "criada": "📥 Anotado no Notion como “Para avaliar”.",
+    "duplicada": "Essa vaga já está no Notion.",
+    "erro": "⚠️ Não consegui salvar no Notion agora. Reenvie a vaga mais tarde.",
+    "desligado": "O envio ao Notion ainda não está configurado (falta o NOTION_TOKEN).",
+}
+
+_TOAST_NOTION = {
+    "criada": " · enviada ao Notion",
+    "duplicada": " · já estava no Notion",
+    "erro": " · Notion falhou",
+    "desligado": "",
+}
+
+
+def _texto_e_link_da_mensagem(mensagem: dict) -> tuple[str, str | None]:
+    """Texto (ou legenda) da mensagem e o link da vaga. O link pode vir solto
+    no texto ou escondido numa palavra clicável (entidade text_link), que é
+    como o compartilhamento de alguns apps chega. Função pura, testável."""
+    texto = (mensagem.get("text") or mensagem.get("caption") or "").strip()
+    link = extrair_link(texto)
+    if not link:
+        entidades = (mensagem.get("entities") or []) + (mensagem.get("caption_entities") or [])
+        for entidade in entidades:
+            if entidade.get("type") == "text_link" and entidade.get("url"):
+                link = entidade["url"]
+                break
+    return texto, link
+
+
+def _processar_mensagem_recebida(mensagem: dict) -> None:
+    """Mensagem que ela manda ou encaminha para o bot vira "Para avaliar" no
+    Notion. Só do chat configurado: mensagem de qualquer outra pessoa que
+    descubra o bot é ignorada. Comandos (/start etc.) também."""
+    chat_id = str((mensagem.get("chat") or {}).get("id", ""))
+    if not chat_id or chat_id != str(TELEGRAM_CHAT_ID):
+        return
+    texto, link = _texto_e_link_da_mensagem(mensagem)
+    if not texto or texto.startswith("/"):
+        return
+    resultado = criar_para_avaliar(
+        titulo_da_mensagem(texto),
+        link=link,
+        descricao="Origem: mensagem enviada ao bot do Telegram\n\n" + texto,
+    )
+    payload = {"chat_id": chat_id, "text": _RESPOSTAS_NOTION.get(resultado, "")}
+    if mensagem.get("message_id"):
+        payload["reply_to_message_id"] = mensagem["message_id"]
+    _chamar_api_telegram("sendMessage", payload)
+
+
+def _enviar_vaga_do_radar_ao_notion(job_id: str) -> str:
+    vaga = obter_vaga(job_id)
+    if not vaga:
+        return "erro"
+    return criar_para_avaliar(
+        vaga.get("titulo") or "Vaga do radar",
+        empresa=vaga.get("empresa") or "",
+        link=vaga.get("link"),
+        descricao=descricao_da_vaga_do_radar(vaga),
+    )
+
 
 def processar_feedback_pendente():
     """Consome os cliques em 👍/👎 desde o último ciclo. Sem webhook, sem
@@ -271,7 +339,7 @@ def processar_feedback_pendente():
     payload = {
         "timeout": 0,  # short poll -- só pergunta "tem algo pendente agora", não fica esperando
         "limit": 100,
-        "allowed_updates": json.dumps(["callback_query"]),
+        "allowed_updates": json.dumps(["callback_query", "message"]),
     }
     offset_salvo = obter_metadado(_OFFSET_CHAVE)
     if offset_salvo:
@@ -291,6 +359,10 @@ def processar_feedback_pendente():
         if update_id is not None:
             maior_update_id = update_id if maior_update_id is None else max(maior_update_id, update_id)
 
+        if update.get("message"):
+            _processar_mensagem_recebida(update["message"])
+            continue
+
         callback = update.get("callback_query")
         if not callback:
             continue
@@ -308,6 +380,9 @@ def processar_feedback_pendente():
             definir_feedback(job_id, feedback)
             emoji = "👍" if feedback == "positivo" else "👎"
             texto_toast = f"Registrado: {emoji}"
+            # 👍 = ela quer avaliar essa vaga: vira "Para avaliar" no Notion.
+            if feedback == "positivo":
+                texto_toast += _TOAST_NOTION.get(_enviar_vaga_do_radar_ao_notion(job_id), "")
             # Substitui o teclado por um botão único, não-funcional de
             # propósito (callback_data "fb|ok|-" nunca bate no parser acima)
             # -- dá confirmação visual e evita clique duplicado mudando o
