@@ -18,7 +18,12 @@ name: Bot rápido (Telegram → Notion)
 on:
   schedule:
     - cron: "*/10 * * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      testar_link:
+        description: "Opcional: um link de vaga para só TESTAR a leitura (não grava nada)"
+        required: false
+        default: ""
 
 concurrency:
   group: jobradar-bot
@@ -43,6 +48,12 @@ jobs:
       # Só o necessário: sem Playwright, que é o que deixa o ciclo completo lento.
       - name: Instalar dependências
         run: pip install requests python-dotenv
+
+      - name: Testar a leitura de um link (não grava nada)
+        if: ${{ github.event.inputs.testar_link != '' }}
+        env:
+          LINK: ${{ github.event.inputs.testar_link }}
+        run: python -m notifier.enriquecer "$LINK"
 
       - name: Ler o bot e gravar no Notion
         env:

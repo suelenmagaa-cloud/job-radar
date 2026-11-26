@@ -5,6 +5,7 @@ import requests
 
 from core.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from database.database import definir_feedback, definir_metadado, obter_metadado, obter_vaga
+from notifier.enriquecer import enriquecer, formatar_descricao
 from notifier.notion import (
     criar_para_avaliar,
     descricao_da_vaga_do_radar,
@@ -297,10 +298,19 @@ def _processar_mensagem_recebida(mensagem: dict) -> None:
     texto, link = _texto_e_link_da_mensagem(mensagem)
     if not texto or texto.startswith("/"):
         return
+    # Abre o link e preenche cargo, empresa e descrição sozinho; o que ela
+    # escreveu na mensagem vai junto, embaixo, se tiver algo além do link.
+    dados = enriquecer(link)
+    partes = ["Origem: mensagem enviada ao bot do Telegram"]
+    if dados:
+        partes.append(formatar_descricao(dados))
+    if texto.strip() != (link or ""):
+        partes.append("Mensagem:\n" + texto)
     resultado = criar_para_avaliar(
-        titulo_da_mensagem(texto),
+        dados.get("titulo") or titulo_da_mensagem(texto),
+        empresa=dados.get("empresa", ""),
         link=link,
-        descricao="Origem: mensagem enviada ao bot do Telegram\n\n" + texto,
+        descricao="\n\n".join(partes),
     )
     payload = {"chat_id": chat_id, "text": _RESPOSTAS_NOTION.get(resultado, "")}
     if mensagem.get("message_id"):
@@ -312,11 +322,15 @@ def _enviar_vaga_do_radar_ao_notion(job_id: str) -> str:
     vaga = obter_vaga(job_id)
     if not vaga:
         return "erro"
+    dados = enriquecer(vaga.get("link"))
+    descricao = descricao_da_vaga_do_radar(vaga)
+    if dados.get("descricao"):
+        descricao += "\n\n" + formatar_descricao(dados)
     return criar_para_avaliar(
-        vaga.get("titulo") or "Vaga do radar",
-        empresa=vaga.get("empresa") or "",
+        vaga.get("titulo") or dados.get("titulo") or "Vaga do radar",
+        empresa=vaga.get("empresa") or dados.get("empresa", ""),
         link=vaga.get("link"),
-        descricao=descricao_da_vaga_do_radar(vaga),
+        descricao=descricao,
     )
 
 
