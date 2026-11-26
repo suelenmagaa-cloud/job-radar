@@ -207,6 +207,26 @@ def extrair_generico(html: str, url: str = "") -> dict:
     }
 
 
+def dados_do_link_glassdoor(url: str) -> dict:
+    """O Glassdoor bloqueia robôs (HTTP 403), mas o próprio link carrega o
+    cargo e a empresa: /job-listing/<slug>-JV_..._KO0,15_KE16,24.htm, em que
+    KO marca onde está o cargo no slug e KE onde está a empresa."""
+    from urllib.parse import unquote
+    achado = re.search(r"/job-listing/([^/?#]+?)-JV_[^?#]*?KO(\d+),(\d+)(?:_KE(\d+),(\d+))?", url or "")
+    if not achado:
+        return {}
+    slug = unquote(achado.group(1))
+    bonito = lambda t: t.replace("-", " ").strip().title() if t else ""
+    titulo = bonito(slug[int(achado.group(2)):int(achado.group(3))])
+    empresa = bonito(slug[int(achado.group(4)):int(achado.group(5))]) if achado.group(4) else ""
+    dados = {"titulo": titulo, "empresa": empresa}
+    if titulo:
+        dados["descricao"] = ("O Glassdoor bloqueia leitura automática: cargo e empresa vieram do "
+                              "próprio link (o nome da empresa pode estar abreviado). Abra o link "
+                              "para a descrição completa.")
+    return dados
+
+
 def formatar_descricao(dados: dict) -> str:
     linhas = []
     if dados.get("local"):
@@ -247,6 +267,8 @@ def enriquecer(link: str | None) -> dict:
         else:
             html = _baixar(link)
             dados = extrair_generico(html, link) if html else {}
+            if not dados.get("titulo") and "glassdoor." in link:
+                dados = dados_do_link_glassdoor(link)
     except Exception as e:  # nunca derruba o bot por causa de uma página estranha
         logger.warning(f"Enriquecer: falhou ao ler a vaga ({type(e).__name__})")
         return {}

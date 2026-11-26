@@ -3,6 +3,7 @@
 import pytest
 
 from notifier.enriquecer import (
+    dados_do_link_glassdoor,
     extrair_generico,
     extrair_linkedin,
     formatar_descricao,
@@ -93,3 +94,14 @@ def test_titulo_vem_do_cabecalho_parecido_com_o_link():
     dados = extrair_generico(html, "https://vagas.medcof.tech/vagas/product-designer")
     assert dados["titulo"] == "Product Designer"
     assert dados["empresa"] == "MedCof"
+
+
+def test_glassdoor_tira_cargo_e_empresa_do_link():
+    url = ("https://www.glassdoor.com.br/job-listing/designer-s%C3%AAnior-direct-b-"
+           "JV_IC2479061_KO0,15_KE16,24.htm?jl=1010333733354&utm_source=jobalert")
+    dados = dados_do_link_glassdoor(url)
+    assert dados["titulo"] == "Designer Sênior" and dados["empresa"] == "Direct B"
+
+
+def test_glassdoor_link_sem_padrao():
+    assert dados_do_link_glassdoor("https://www.glassdoor.com.br/Vaga/index.htm") == {}
