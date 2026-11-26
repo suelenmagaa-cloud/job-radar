@@ -148,7 +148,26 @@ def _meta(html: str, nome: str) -> str:
     return ""
 
 
-def extrair_generico(html: str) -> dict:
+def _palavras(texto: str) -> set[str]:
+    return {p for p in re.split(r"[^a-z0-9à-ú]+", (texto or "").lower()) if len(p) > 2}
+
+
+def _melhor_titulo(html: str, url: str, empresa: str) -> str:
+    """Entre os <h1>/<h2> da página, o que mais se parece com o fim do link
+    (vagas.site/vagas/product-designer → "Product Designer"). Evita pegar o
+    nome do site, que muitas páginas usam no <title>."""
+    cabecalhos = [html_para_texto(h) for h in re.findall(r"<h[12][^>]*>(.*?)</h[12]>", html or "", re.S | re.I)]
+    cabecalhos = [h for h in cabecalhos if h and len(h) <= 150 and h.lower() != (empresa or "").lower()]
+    fim_do_link = (url or "").rstrip("/").split("?")[0].rsplit("/", 1)[-1]
+    alvo = _palavras(fim_do_link.replace("-", " ").replace("_", " "))
+    if alvo and cabecalhos:
+        melhor = max(cabecalhos, key=lambda h: len(_palavras(h) & alvo))
+        if _palavras(melhor) & alvo:
+            return melhor
+    return ""
+
+
+def extrair_generico(html: str, url: str = "") -> dict:
     """JSON-LD JobPosting quando existir; senão, metadados e texto da página."""
     for bloco in re.findall(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', html or "", re.S | re.I):
         try:
@@ -177,6 +196,7 @@ def extrair_generico(html: str) -> dict:
     partes = re.split(r"\s+[|–—-]\s+", titulo)
     if len(partes) >= 2:
         titulo, empresa = partes[0], empresa or partes[-1]
+    titulo = _melhor_titulo(html, url, empresa) or titulo
     corpo = re.search(r"<body[^>]*>(.*)</body>", html or "", re.S | re.I)
     texto = html_para_texto(corpo.group(1) if corpo else html or "")
     return {
@@ -226,7 +246,7 @@ def enriquecer(link: str | None) -> dict:
             dados = extrair_linkedin(html) if html else {}
         else:
             html = _baixar(link)
-            dados = extrair_generico(html) if html else {}
+            dados = extrair_generico(html, link) if html else {}
     except Exception as e:  # nunca derruba o bot por causa de uma página estranha
         logger.warning(f"Enriquecer: falhou ao ler a vaga ({type(e).__name__})")
         return {}

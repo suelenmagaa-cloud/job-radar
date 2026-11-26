@@ -85,3 +85,11 @@ def test_html_estranho_nao_quebra():
 def test_descricao_e_cortada():
     texto = formatar_descricao({"local": "SP", "descricao": "x" * 20000})
     assert len(texto) <= 8000 and texto.startswith("Local: SP")
+
+
+def test_titulo_vem_do_cabecalho_parecido_com_o_link():
+    html = ("<html><head><title>Carreiras Tech | MedCof</title></head><body>"
+            "<h1>MedCof Tech</h1><h1>Product Designer</h1><h2>Sobre a vaga</h2></body></html>")
+    dados = extrair_generico(html, "https://vagas.medcof.tech/vagas/product-designer")
+    assert dados["titulo"] == "Product Designer"
+    assert dados["empresa"] == "MedCof"
