@@ -1,0 +1,100 @@
+name: Bot rápido (Telegram → Notion)
+
+# Versão leve do radar: NÃO busca vagas. Só lê o bot do Telegram (👍/👎 e
+# as vagas que a Suelen manda ou encaminha) e cria "Para avaliar" no Notion.
+#
+# Por que existe: o ciclo completo (jobradar.yml) roda 07:17 e 17:17 e leva
+# ~30 min. Vaga mandada às 10h esperava até 17h. Este aqui roda a cada 10
+# min (o GitHub costuma atrasar alguns minutos) e em ~1 min pelo botão
+# "Run workflow".
+#
+# Grupo de concorrência PRÓPRIO, de propósito. Se fosse o mesmo do ciclo
+# completo, um disparo deste aqui na fila poderia substituir (e cancelar) o
+# ciclo de busca que estava esperando. O custo de grupos separados é pequeno:
+# se os dois rodarem juntos, o ciclo completo grava o banco dele por cima e
+# um 👎/👍 registrado aqui no meio pode sumir do banco (o Notion não é
+# afetado — a linha já foi criada). O Telegram não reentrega o que já foi
+# lido, então não há linha duplicada.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: jobradar-bot
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  processar-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Só o necessário: sem Playwright, que é o que deixa o ciclo completo lento.
+      - name: Instalar dependências
+        run: pip install requests python-dotenv
+
+      - name: Ler o bot e gravar no Notion
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+        run: python processar_bot.py
+
+      # Adota o estado remoto inteiro (como o ciclo completo, ver jobradar.yml)
+      # e, DIFERENTE dele, não copia o banco inteiro por cima: só aplica no
+      # banco remoto o que o bot mudou (offset do Telegram e 👍/👎). Copiar o
+      # arquivo inteiro apagaria vagas que um ciclo completo tenha gravado
+      # neste meio-tempo, e elas voltariam a ser notificadas como novas.
+      - name: Salvar o progresso do bot
+        run: |
+          git config user.name "jobradar-bot"
+          git config user.email "jobradar-bot@users.noreply.github.com"
+          cp data/jobs.db "${RUNNER_TEMP:-/tmp}/bot.db"
+          n=0
+          while :; do
+            git fetch origin main
+            git reset --hard origin/main
+            python - <<'PY'
+          import os, sqlite3
+          bot = os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), "bot.db")
+          with sqlite3.connect("data/jobs.db") as conn:
+              conn.execute("ATTACH DATABASE ? AS bot", (bot,))
+              conn.execute(
+                  "INSERT OR REPLACE INTO metadados (chave, valor) "
+                  "SELECT b.chave, b.valor FROM bot.metadados b WHERE b.chave = 'telegram_update_offset' "
+                  "AND b.valor IS NOT (SELECT m.valor FROM main.metadados m WHERE m.chave = b.chave)"
+              )
+              conn.execute(
+                  "UPDATE vagas_vistas SET feedback = (SELECT b.feedback FROM bot.vagas_vistas b "
+                  "WHERE b.id = vagas_vistas.id) WHERE id IN (SELECT b.id FROM bot.vagas_vistas b "
+                  "WHERE b.feedback IS NOT NULL AND b.feedback IS NOT "
+                  "(SELECT m.feedback FROM main.vagas_vistas m WHERE m.id = b.id))"
+              )
+          PY
+            git add data/jobs.db
+            if git diff --cached --quiet; then
+              echo "Nada novo pra commitar."
+              exit 0
+            fi
+            git commit -m "chore: bot processado [skip ci]"
+            if git push; then
+              exit 0
+            fi
+            n=$((n + 1))
+            if [ "$n" -ge 5 ]; then
+              echo "Push falhou depois de 5 tentativas."
+              exit 1
+            fi
+            sleep $((RANDOM % 5 + 1))
+          done
